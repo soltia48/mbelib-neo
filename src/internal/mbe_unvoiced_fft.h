@@ -70,6 +70,9 @@ void mbe_fft_plan_free(mbe_fft_plan* plan);
  */
 int mbe_fft_forward_real(mbe_fft_plan* plan, const float input[MBE_FFT_SIZE], float output[MBE_FFT_SIZE]);
 
+/** Inverse of the ordered real transform, including 1/256 normalization. */
+int mbe_fft_inverse_real(mbe_fft_plan* plan, const float input[MBE_FFT_SIZE], float output[MBE_FFT_SIZE]);
+
 /**
  * @brief Generate LCG noise samples for unvoiced synthesis.
  *

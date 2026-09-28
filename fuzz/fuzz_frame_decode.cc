@@ -208,6 +208,36 @@ run_imbe7100_case(std::uint8_t mode, FuzzState& state, const std::uint8_t* data,
     }
 }
 
+static void
+run_ambe4000_case(std::uint8_t mode, FuzzState& state, const std::uint8_t* data, std::size_t size) {
+    mbe_ambe4000_decoder* decoder = mbe_ambe4000DecoderAlloc();
+    if (!decoder) {
+        return;
+    }
+    // Exercise consecutive frames as well as reset and invalid-input paths.
+    for (std::size_t step = 0; step < 4; ++step) {
+        char bits[80] = {};
+        char encoded[128] = {};
+        if ((mode & 1U) == 0U) {
+            char frame[1][128];
+            fill_hard_frame(frame, data, size, 2U + step * 16U, state.raw_bits);
+            if (mbe_decodeAmbe6400x4000Frame(frame[0], bits, &state.result) >= 0) {
+                (void)mbe_encodeAmbe6400x4000Frame(bits, encoded);
+                (void)mbe_processAmbe4000Dataf(state.out, &state.result, bits, decoder);
+            }
+            (void)mbe_processAmbe6400x4000Framef(state.out, &state.result, frame[0], bits, decoder);
+        } else {
+            mbe_soft_bit frame[1][128];
+            fill_soft_frame(frame, data, size, 2U + step * 16U, state.raw_bits);
+            (void)mbe_processAmbe6400x4000SoftFramef(state.out, &state.result, frame[0], bits, decoder);
+        }
+        if (mode >= 2U) {
+            mbe_ambe4000DecoderReset(decoder);
+        }
+    }
+    mbe_ambe4000DecoderFree(decoder);
+}
+
 extern "C" int
 LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size) {
     if (data == nullptr || size == 0U) {
@@ -215,14 +245,15 @@ LLVMFuzzerTestOneInput(const std::uint8_t* data, std::size_t size) {
     }
 
     FuzzState state = make_state(data);
-    const std::uint8_t choice = data[0] % 16U;
+    const std::uint8_t choice = data[0] % 20U;
     const std::uint8_t mode = choice % 4U;
 
     switch (choice / 4U) {
         case 0: run_ambe2400_case(mode, state, data, size); break;
         case 1: run_ambe2450_case(mode, state, data, size); break;
         case 2: run_imbe7200_case(mode, state, data, size); break;
-        default: run_imbe7100_case(mode, state, data, size); break;
+        case 3: run_imbe7100_case(mode, state, data, size); break;
+        default: run_ambe4000_case(mode, state, data, size); break;
     }
 
     return 0;

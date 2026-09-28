@@ -165,9 +165,9 @@ typedef struct mbe_soft_bit {
 /** Processing/result flag: output was muted/comfort-noise substituted. */
 #define MBE_PROCESS_FLAG_MUTE       0x0080u
 /**
- * Processing/result flag: an AMBE 3600x2450 silence frame (b0 124/125) was
- * decoded and synthesized. Silence frames do not update the prediction
- * history (TIA-102.BABA-1 4.3). Not rendered by mbe_formatProcessResult().
+ * Processing/result flag: an AMBE silence frame was
+ * decoded and synthesized. For AMBE 2450 (b0 124/125), silence frames do not
+ * update prediction history (TIA-102.BABA-1 4.3). AMBE 4000 code 124 is muted. Not rendered by mbe_formatProcessResult().
  */
 #define MBE_PROCESS_FLAG_SILENCE    0x0100u
 /**
@@ -285,6 +285,74 @@ MBE_API int mbe_7100x4400hamming1511(const char* in, char* out);
  * @return Number of hard-decision bit differences between `in` and the selected codeword.
  */
 MBE_API int mbe_7100x4400hamming1511Soft(const mbe_soft_bit* in, char* out);
+
+/* Prototypes from ambe6400x4000.c (channel coding only) */
+/**
+ * @brief Encode AMBE+ 4000/2400 channel FEC (rate index 26).
+ *
+ * ambe_d contains 80 binary parameter bits in priority order (deinterleaved).
+ * ambe_fr contains 128 binary bits in device channel order, MSB first when
+ * packing bytes. This does not encode PCM. The first 36 parameter bits are
+ * convolutionally protected; the remaining 44 pass through without FEC.
+ * Input and output may overlap. Returns 0 or a negative MBE_STATUS_* code.
+ */
+MBE_API int mbe_encodeAmbe6400x4000Frame(const char ambe_d[80], char ambe_fr[128]);
+/**
+ * @brief Viterbi-decode a 128-bit AMBE+ 4000/2400 channel frame.
+ *
+ * Writes 80 parameter bits in priority order. Returns the Hamming distance
+ * between the received protected bits and the selected terminated codeword;
+ * this is not a guarantee that every error was corrected. Unprotected errors
+ * cannot be detected. result may be NULL; otherwise it is initialized, with
+ * protected_errors and total_errors set to the distance. C0/C4 do not apply.
+ * Input is unchanged. Invalid input returns a negative MBE_STATUS_* code and
+ * leaves ambe_d unchanged. Not compatible with AMBE+2 rate index 58.
+ */
+MBE_API int mbe_decodeAmbe6400x4000Frame(const char ambe_fr[128], char ambe_d[80], mbe_process_result* result);
+/**
+ * @brief Weighted Viterbi decode; reliability is the cost of changing a bit.
+ * @see mbe_decodeAmbe6400x4000Frame
+ * The return value remains a hard-bit distance, not the weighted path cost.
+ */
+MBE_API int mbe_decodeAmbe6400x4000SoftFrame(const mbe_soft_bit ambe_fr[128], char ambe_d[80],
+                                             mbe_process_result* result);
+
+/** Opaque, per-stream experimental AMBE+ 4000 speech decoder. */
+typedef struct mbe_ambe4000_decoder mbe_ambe4000_decoder;
+/** Allocate and initialize a decoder and FFT plan; NULL on allocation failure.
+ * No hardware, files, Python, or external service is used. Processing allocates
+ * no memory. Each concurrent stream must own a separate context. The speech
+ * model is approximate; sample-exact conformance is not established. */
+MBE_API mbe_ambe4000_decoder* mbe_ambe4000DecoderAlloc(void);
+/** Reset spectral history, overlap, tone phase and per-stream noise seed. NULL is a no-op. */
+MBE_API void mbe_ambe4000DecoderReset(mbe_ambe4000_decoder* dec);
+/** Free decoder and plan. NULL is a no-op. */
+MBE_API void mbe_ambe4000DecoderFree(mbe_ambe4000_decoder* dec);
+/** Decode 80 priority-ordered speech bits to 160 float samples (int16/7 scale).
+ * Returns 0 or a negative MBE_STATUS_* code. result is optional and output-only.
+ * Invalid arguments/bits preserve PCM and decoder state. Code 124 is rendered
+ * as silence (SILENCE|MUTE); unsupported special frames are muted (ERASURE|MUTE).
+ * Tone support includes single, DTMF and call-progress IDs. Decoder
+ * tables, pitch law and subframe synthesis are approximations; see
+ * docs/ambe4000.md for validation and limits. This does not encode PCM. */
+MBE_API int mbe_processAmbe4000Dataf(float out[160], mbe_process_result* result, const char bits[80],
+                                     mbe_ambe4000_decoder* dec);
+/** Signed PCM16 counterpart of mbe_processAmbe4000Dataf(). */
+MBE_API int mbe_processAmbe4000Data(short out[160], mbe_process_result* result, const char bits[80],
+                                    mbe_ambe4000_decoder* dec);
+/** FEC and software speech decode of one rate-26 frame. Returns selected-path
+ * Hamming distance, or a negative status. bits may be NULL; otherwise receives
+ * 80 decoded priority bits. Invalid input preserves PCM, bits and state.
+ * Unprotected errors cannot be detected. result is optional and output-only. */
+MBE_API int mbe_processAmbe6400x4000Framef(float out[160], mbe_process_result* result, const char frame[128],
+                                           char bits[80], mbe_ambe4000_decoder* dec);
+MBE_API int mbe_processAmbe6400x4000Frame(short out[160], mbe_process_result* result, const char frame[128],
+                                          char bits[80], mbe_ambe4000_decoder* dec);
+/** Weighted Viterbi and speech decode; the return value is the hard distance. */
+MBE_API int mbe_processAmbe6400x4000SoftFramef(float out[160], mbe_process_result* result,
+                                               const mbe_soft_bit frame[128], char bits[80], mbe_ambe4000_decoder* dec);
+MBE_API int mbe_processAmbe6400x4000SoftFrame(short out[160], mbe_process_result* result, const mbe_soft_bit frame[128],
+                                              char bits[80], mbe_ambe4000_decoder* dec);
 
 /* Prototypes from ambe3600x2400.c */
 /** @brief Print AMBE 2400 parameter bits to stderr (debug). */

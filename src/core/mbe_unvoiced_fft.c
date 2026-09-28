@@ -173,6 +173,19 @@ mbe_fft_forward_real(mbe_fft_plan* plan, const float input[MBE_FFT_SIZE], float 
     return 0;
 }
 
+int
+mbe_fft_inverse_real(mbe_fft_plan* plan, const float input[MBE_FFT_SIZE], float output[MBE_FFT_SIZE]) {
+    if (!plan || !input || !output) {
+        return MBE_STATUS_INVALID_ARGUMENT;
+    }
+    memcpy(plan->Uw_fft, input, MBE_FFT_SIZE * sizeof(float));
+    pffft_transform_ordered(plan->setup, plan->Uw_fft, plan->Uw_out, plan->work, PFFFT_BACKWARD);
+    for (int n = 0; n < MBE_FFT_SIZE; ++n) {
+        output[n] = plan->Uw_out[n] / (float)MBE_FFT_SIZE;
+    }
+    return 0;
+}
+
 float
 mbe_synthesisWindow(int n) {
     return (n < -105 || n > 105) ? 0.0f : Ws[n + 160];

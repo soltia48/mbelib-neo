@@ -181,7 +181,7 @@ cmake --build build/dev-debug --target example_print_version
 
 Use hard-frame `mbe_process*Frame*` APIs when you want one-call decode+synthesis from interleaved codec frames. These APIs accept const frame arrays, run demod/ECC, populate `mbe_process_result`, and write the scratch/output parameter bits.
 
-Use `mbe_decode*Frame()` / `mbe_decode*SoftFrame()` when you need staged decode. These helpers accept const frame input, fill hard parameter bits, optionally populate `mbe_process_result`, and return the corrected error total without synthesizing audio. Use `mbe_process*Data*` for later synthesis when you want to carry that result context forward.
+Use `mbe_decode*Frame()` / `mbe_decode*SoftFrame()` when you need staged decode. These helpers accept const frame input, fill hard parameter bits, optionally populate `mbe_process_result`, and return the corrected error total without synthesizing audio. Use `mbe_process*Data*` for later synthesis. The legacy 2400/2450/4400 paths carry result context forward; the new 4000 path treats the result as output-only.
 
 Use `mbe_process*Data*` when you already have unpacked parameter bits.
 
@@ -194,22 +194,51 @@ IMBE 7100x4400 frame decoders convert their `imbe_d[88]` output to the 7200x4400
 - `mbe_encodeDStarDVData()` packs a frame into nine D-STAR DV data bytes in air order, LSB first, without the sync word.
 - `mbe_decodeDStarDVData()` unpacks nine D-STAR DV data bytes into `char ambe_fr[4][24]`.
 
+### AMBE+ 4000/2400 software decoding
+
+AMBE+ 4,000 bps speech + 2,400 bps FEC (rate index 26) can be decoded
+in software. The experimental C decoder produces 160 PCM samples per frame
+and uses a caller-owned `mbe_ambe4000_decoder` context. Use
+`mbe_processAmbe6400x4000Frame()` or its float/soft-input variants for 128 channel
+bits; `mbe_processAmbe4000Data()` accepts 80 priority-ordered speech bits.
+
+```sh
+cmake --preset dev-debug
+cmake --build --preset dev-debug -j
+build/dev-debug/ambe4000_decode < input.ambe > output.wav
+```
+
+Input is consecutive 16-byte rate-26 frames, MSB first, without transport
+headers. Output is 8 kHz mono PCM16 WAV. Native speech decoding was validated
+on four public speech clips; STOI was 0.798–0.885, and a two-sentence clip
+matched the source ASR transcript apart from letter case.
+The speech model is **experimental and approximate**; sample-exact conformance
+is not established.
+DTX is muted; some special-frame rules remain unresolved. Native PCM encoding
+is not implemented. Rate index 58 is incompatible AMBE+2.
+
+The verified channel-only APIs remain available:
+`mbe_encodeAmbe6400x4000Frame()`, `mbe_decodeAmbe6400x4000Frame()` and
+`mbe_decodeAmbe6400x4000SoftFrame()`. See [API details, validation and
+limitations](docs/ambe4000.md).
+
 ### Encoder Workflow
 
 - Encoder state: use one `mbe_ambe2400_encoder` context per stream, with any number of contexts per thread; concurrent use of the same context requires external synchronization. Initialize with `mbe_ambe2400EncoderAlloc()` plus `mbe_initMbeParms()`, advance prediction with `mbe_moveMbeParms(cur_mp, prev_mp)` between frames, and restart with `mbe_ambe2400EncoderReset()` plus `mbe_initMbeParms()`. Encoding never allocates and does not modify `prev_mp`. State equivalence is with the `mbe_processAmbe2400*` path, which resets on silence. The analysis delay is about 10 ms; feed one final zero frame to flush the tail.
 
 ### Stateful Decode Workflow
 
-- Keep one `mbe_parms` state triplet per audio stream/thread: `cur_mp`, `prev_mp`, and `prev_mp_enhanced`. The three must be distinct objects.
+- For AMBE+ 4000, use one `mbe_ambe4000_decoder` per stream; allocation initializes it and `mbe_ambe4000DecoderReset()` restarts it. Its result is output-only.
+- For the other codecs, keep one `mbe_parms` state triplet per audio stream/thread: `cur_mp`, `prev_mp`, and `prev_mp_enhanced`. The three must be distinct objects.
 - In AMBE 3600x2450, `prev_mp` is the last valid voice frame (the prediction history) and `prev_mp_enhanced` is the last synthesized frame. When you drive `mbe_decodeAmbe2450Parms()` yourself, copy `cur_mp` into `prev_mp` only when `mbe_classifyAmbe2450Frame()` returns `MBE_AMBE2450_FRAME_VOICE`. `mbe_decodeAmbe2450Parms()` returns `MBE_AMBE2450_FRAME_VOICE` for silence frames too, as in 2.1, since both decode a model.
 - Initialize once before decoding with `mbe_initMbeParms(&cur_mp, &prev_mp, &prev_mp_enhanced)`.
 - Prefer `mbe_process*Frame*` APIs when you have raw hard-decision vocoder frames and do not need staged parameter handling.
 - For soft-decision input, fill `mbe_soft_bit.bit` with the hard decision and `mbe_soft_bit.reliability` with confidence (`0` is erasure-like, `255` is highly reliable), then call `mbe_decode*SoftFrame()` or `mbe_process*SoftFrame*()`.
 - Helper constructors are available for common inputs: `mbe_softBitsFromHard()` assigns a fixed reliability and validates hard bits, while `mbe_softBitsFromLlr()` maps positive signed LLRs to bit 1 with magnitude clamped to `0..255`.
-- Processing APIs report frame state through `mbe_process_result`: `c0_errors`, `protected_errors`, IMBE-specific `c4_errors`, `total_errors`, and flags such as `MBE_PROCESS_FLAG_SOFT_INPUT`, `MBE_PROCESS_FLAG_C0_VALID`, `MBE_PROCESS_FLAG_C4_VALID`, `MBE_PROCESS_FLAG_TONE`, `MBE_PROCESS_FLAG_ERASURE`, `MBE_PROCESS_FLAG_REPEAT`, `MBE_PROCESS_FLAG_MUTE`, `MBE_PROCESS_FLAG_SILENCE` (AMBE 3600x2450 silence frames), and `MBE_PROCESS_FLAG_PROVOICE` (context set by the IMBE 7100x4400 decoders).
+- Processing APIs report frame state through `mbe_process_result`: `c0_errors`, `protected_errors`, IMBE-specific `c4_errors`, `total_errors`, and flags such as `MBE_PROCESS_FLAG_SOFT_INPUT`, `MBE_PROCESS_FLAG_C0_VALID`, `MBE_PROCESS_FLAG_C4_VALID`, `MBE_PROCESS_FLAG_TONE`, `MBE_PROCESS_FLAG_ERASURE`, `MBE_PROCESS_FLAG_REPEAT`, `MBE_PROCESS_FLAG_MUTE`, `MBE_PROCESS_FLAG_SILENCE` (AMBE 3600x2450 silence and AMBE+ 4000 DTX frames), and `MBE_PROCESS_FLAG_PROVOICE` (context set by the IMBE 7100x4400 decoders).
 - Use `mbe_formatProcessResult()` when you need a compact status string from a result. It writes `'='` repeated `total_errors` times, then any `E`, `T`, `R`, and `M` flags in that order, truncated to the supplied buffer size. The silence flag is not rendered.
 - Hard input bits must be exactly `0` or `1`; soft `mbe_soft_bit.bit` values must also be exactly `0` or `1`. Invalid pointers/counters return `MBE_STATUS_INVALID_ARGUMENT`; invalid bit values return `MBE_STATUS_INVALID_BITS`.
-- For parameter-only processing, seed `mbe_process_result.total_errors` and any valid C0/C4 context before calling `mbe_process*Data*`.
+- For legacy 2400/2450/4400 parameter-only processing, seed `mbe_process_result.total_errors` and any valid C0/C4 context before calling `mbe_process*Data*`.
 - Use `mbe_versionString()` for the static NUL-terminated library version string.
 
 ### Audio Sample Scaling (Float vs int16)

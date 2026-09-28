@@ -252,6 +252,8 @@ endif()
 # Explicit source lists (avoids FILE(GLOB ...))
 set(MBELIB_FIRST_PARTY_SOURCES
     src/ambe/ambe3600x2400.c
+    src/ambe/ambe6400x4000.c
+    src/ambe/ambe4000_decode.c
     src/ambe/ambe3600x2400_enc.c
     src/ambe/dstar_frame.c
     src/ambe/ambe3600x2450.c
@@ -777,12 +779,46 @@ if(MBELIB_BUILD_EXAMPLES)
     if(_SAN_LDFLAGS)
         target_link_options(example_dstar_decode BEFORE PRIVATE ${_SAN_LDFLAGS})
     endif()
+
+    add_executable(example_ambe4000_decode examples/ambe4000_decode.c)
+    target_link_libraries(
+        example_ambe4000_decode
+        PRIVATE ${MBELIB_EXEC_LINK_TGT}
+    )
+    _mbelib_apply_hardening(example_ambe4000_decode)
+    target_include_directories(
+        example_ambe4000_decode
+        PRIVATE "${PROJECT_SOURCE_DIR}/include"
+    )
+    set_target_properties(
+        example_ambe4000_decode
+        PROPERTIES OUTPUT_NAME ambe4000_decode
+    )
+    if(_SAN_CFLAGS)
+        target_compile_options(example_ambe4000_decode PRIVATE ${_SAN_CFLAGS})
+    endif()
+    if(_SAN_LDFLAGS)
+        target_link_options(
+            example_ambe4000_decode
+            BEFORE
+            PRIVATE ${_SAN_LDFLAGS}
+        )
+    endif()
 endif()
 
 # Tests
 if(MBELIB_BUILD_TESTS)
     include(CTest)
     enable_testing()
+    find_package(Python3 3.7 QUIET COMPONENTS Interpreter)
+    if(Python3_Interpreter_FOUND)
+        add_test(
+            NAME test_thumbdv_probe
+            COMMAND
+                ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/tests/test_thumbdv_probe.py
+        )
+    endif()
     # Golden data generator tool (not a test): helpful for refreshing hashes
     add_executable(gen_golden tools/gen_golden.c)
     target_link_libraries(gen_golden PRIVATE ${MBELIB_EXEC_LINK_TGT})
@@ -820,6 +856,45 @@ if(MBELIB_BUILD_TESTS)
         target_link_options(test_ecc BEFORE PRIVATE ${_SAN_LDFLAGS})
     endif()
     add_test(NAME test_ecc COMMAND test_ecc)
+
+    add_executable(test_ambe4000 tests/test_ambe4000.c)
+    target_link_libraries(test_ambe4000 PRIVATE ${MBELIB_EXEC_LINK_TGT})
+    if(_SAN_CFLAGS)
+        target_compile_options(test_ambe4000 PRIVATE ${_SAN_CFLAGS})
+    endif()
+    if(_SAN_LDFLAGS)
+        target_link_options(test_ambe4000 BEFORE PRIVATE ${_SAN_LDFLAGS})
+    endif()
+    add_test(NAME test_ambe4000 COMMAND test_ambe4000)
+
+    add_executable(test_ambe4000_speech tests/test_ambe4000_speech.c)
+    target_link_libraries(test_ambe4000_speech PRIVATE ${MBELIB_EXEC_LINK_TGT})
+    if(_SAN_CFLAGS)
+        target_compile_options(test_ambe4000_speech PRIVATE ${_SAN_CFLAGS})
+    endif()
+    if(_SAN_LDFLAGS)
+        target_link_options(test_ambe4000_speech BEFORE PRIVATE ${_SAN_LDFLAGS})
+    endif()
+    add_test(NAME test_ambe4000_speech COMMAND test_ambe4000_speech)
+    if(
+        Python3_Interpreter_FOUND
+        AND MBELIB_BUILD_EXAMPLES
+        AND NOT CMAKE_CROSSCOMPILING
+    )
+        add_test(
+            NAME test_ambe4000_cli
+            COMMAND
+                ${Python3_EXECUTABLE}
+                ${PROJECT_SOURCE_DIR}/tests/test_ambe4000_cli.py
+                $<TARGET_FILE:example_ambe4000_decode>
+        )
+    endif()
+    if(NOTONES)
+        target_compile_definitions(
+            test_ambe4000_speech
+            PRIVATE DISABLE_AMBE_TONES
+        )
+    endif()
 
     add_executable(test_ambe2400_encoder tests/test_ambe2400_encoder.c)
     # The private Golay encoder is hidden in the shared library.
@@ -1205,6 +1280,8 @@ if(MBELIB_BUILD_TESTS)
         test_api
         test_ecc
         test_ambe2400_encoder
+        test_ambe4000
+        test_ambe4000_speech
         test_noise_determinism
         test_params
         test_frame_paths

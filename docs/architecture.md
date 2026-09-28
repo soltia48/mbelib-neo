@@ -24,6 +24,9 @@ the library.
 - `src/ecc/`: error-correction helpers and constants.
 - `src/ambe/`: AMBE frame and data processing.
 - `src/ambe/ambe3600x2400_enc.c`: AMBE 2400 speech analysis and encoding.
+- `src/ambe/ambe6400x4000.c`: AMBE+ 4000/2400 channel FEC and interleaving.
+- `src/ambe/ambe4000_decode.c`: experimental AMBE+ 4000 parameter decoding and two-subframe synthesis.
+- `src/internal/ambe4000_model.h`: approximate speech model tables.
 - `src/ambe/dstar_frame.c`: D-STAR DV air-interface byte mapping.
 - `src/imbe/`: IMBE frame and data processing.
 - `src/internal/`: private headers shared by implementation units.
@@ -46,8 +49,11 @@ Consumers normally use:
 - pkg-config package `libmbe-neo`
 
 The library writes 8 kHz audio frames and keeps stream state in caller-provided
-`mbe_parms` objects. Processing APIs are reentrant when each stream has its own
-state.
+`mbe_parms` objects for the legacy modes. AMBE+ 4000 uses an opaque
+`mbe_ambe4000_decoder` that owns spectral history, overlap buffers, a noise RNG
+and an FFT plan. Processing APIs are reentrant when each stream has its own
+state. The new decoder allocates only during context creation; it needs no
+hardware, Python, external model file or runtime service.
 
 ## Data Flow
 

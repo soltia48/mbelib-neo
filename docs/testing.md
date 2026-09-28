@@ -438,3 +438,27 @@ The formal multi-listener perceptual result remains `not_established`.
 The maintainer explicitly chose to retain the candidate despite the mixed
 objective and personal listening results; that decision does not alter the
 recorded measurement gates.
+
+## AMBE+ 4000/2400 software decoding
+
+`test_ambe4000` checks native FEC against 27 synthetic reference vectors,
+all protected/unprotected single-bit errors, soft decisions and invalid input.
+`test_ambe4000_speech` checks float/PCM16 and raw/hard/soft path agreement,
+protected-bit correction through synthesis, reset determinism, independent
+contexts, invalid-input state preservation, a 1000 Hz
+tone fixture and all 128 pitch codes under 1,024 arbitrary parameter frames.
+`test_ambe4000_cli` checks WAV output, empty input and every partial-frame length.
+These tests need no device or downloaded speech corpus and support `NOTONES`.
+The frame fuzz target also exercises consecutive AMBE+ 4000 synthesis calls.
+
+`test_thumbdv_probe` checks the optional hardware tools without a device or
+pyserial. NumPy enables its harmonic estimation, known exponential decay and
+synthetic voicing tests; those tests skip when NumPy is absent.
+
+Independent speech validation is recorded in [the model and validation notes](ambe4000-research.md#independent-native-speech-validation).
+`tools/ambe4000/evaluate_speech.py` runs the C CLI on archived rate-26 frames,
+checks source hashes, measures STOI at a fixed 240-sample delay and optionally
+runs a locally cached ASR model. This optional evaluation needs NumPy, SciPy and
+pystoi (plus faster-whisper for ASR). It never opens a device or downloads a
+model. Speech quality is approximate; neither passing unit tests nor a good
+ASR result establishes full proprietary-codec conformance.
